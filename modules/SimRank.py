@@ -491,9 +491,9 @@ class tag_simrank:
                 print("GPU failed, trying with CPU...")
                 start1 = time.time()
                 S_item = E_item * C_item * np.dot(np.dot(W_item_user, S_user), W_item_user.T)
-            np.fill_diagonal(S_item, 1)
             
             S_item = (1 - lbd) * S_item + lbd * self.S_tag_based
+            np.fill_diagonal(S_item, 1)
             
             end1 = time.time()
 
