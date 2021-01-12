@@ -193,68 +193,39 @@ class weighted_bipartite_simrank:
             pkl.dump(self, f)
         print(f'Model saved as {path + name}')
 
-    def fit(self, df, C_item = 0.8, C_user = 0.8, iterations = 100, eps = 1e-4):
-        G_user, G_item = self._create_graph_from_df(df)
-        self.users = G_user.index
-        self.items = G_item.index
-        self.N_user = len(self.users)
-        self.N_item = len(self.items)
-        print(f"User count: {self.N_user}, item count: {self.N_item}")
+    def _cal_W(self, G, N, obj, GPU = False):
+        if obj == 'user':
+            G_var = self.G_rating
+        else:
+            G_var = self.G_rating.T
+        print(f'Initializing {obj}-W matrix...')
+        start = time.time()
+        spread = np.zeros((N, N))
+        np.fill_diagonal(
+            spread, 
+            G_var.var(axis = 1).fillna(0).apply(lambda x: np.exp(-x))
+            )
+        if GPU:
+            W = run_dot_product(spread, G.fillna(0))
+        else:
+            W = np.dot(spread, G.fillna(0))
+        end = time.time()
+        print(f"Finished in {end - start}s!")
+        return W
+    
+    def _cal_E(self, G, obj, GPU = False):
+        print(f"Initializing {obj} evidence matrix...")
+        start = time.time()
+        if GPU:
+            E = run_dot_product((G > 0).astype(int), (G > 0).T.astype(int))
+        else:
+            E = np.dot((G > 0).astype(int), (G > 0).T.astype(int))
+        E = 1 - 0.5 ** E
+        end = time.time()
+        print(f"Finished in {end - start}s!")
+        return E
 
-        print("Initializing User spread matrix...")
-        start = time.time()
-        spread_user = np.zeros((self.N_user, self.N_user))
-        np.fill_diagonal(spread_user, G_user.var(axis = 1).apply(lambda x: np.exp(-x)))
-        try:
-            # Try with GPU
-            W_user_item = run_dot_product(spread_user, G_user.fillna(0)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            W_user_item = np.dot(spread_user, G_user.fillna(0))
-        end = time.time()
-        print(f"Finished in {end - start}s!")
-        
-        print("Initializing Item spread matrix...")
-        start = time.time()
-        spread_item = np.zeros((self.N_item, self.N_item))
-        np.fill_diagonal(spread_item, G_item.var(axis = 1).apply(lambda x: np.exp(-x)))
-        try:
-            # Try with GPU
-            W_item_user = run_dot_product(spread_user, G_item.fillna(0)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            W_item_user = np.dot(spread_item, G_item.fillna(0))
-        end = time.time()
-        print(f"Finished in {end - start}s!")
-        
-        print("Initializing User evidence matrix...")
-        start = time.time()
-        try:
-            # Try with GPU
-            E_user = run_dot_product((G_user > 0).astype(int), (G_user > 0).T.astype(int)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            E_user = np.dot((G_user > 0).astype(int), (G_user > 0).T.astype(int))
-        E_user = 1 - 0.5**E_user
-        end = time.time()
-        print(f"Finished in {end - start}s!")
-        
-        print("Initializing Item evidence matrix...")
-        start = time.time()
-        try:
-            # Try with GPU
-            E_item = run_dot_product((G_item > 0).astype(int), (G_item > 0).T.astype(int)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            E_item = np.dot((G_item > 0).astype(int), (G_item > 0).T.astype(int))
-        E_item = 1 - 0.5**E_item
-        end = time.time()
-        print(f"Finished in {end - start}s!")
-
+    def _cal_S(self, C_user, C_item, iterations, eps, GPU = False):
         S_item = np.zeros((self.N_item, self.N_item))
         np.fill_diagonal(S_item, 1)
         S_item_old = np.zeros((self.N_item, self.N_item))
@@ -262,7 +233,7 @@ class weighted_bipartite_simrank:
         S_user = np.zeros((self.N_user, self.N_user))
         np.fill_diagonal(S_user, 1)
         S_user_old = np.zeros((self.N_user, self.N_user))
-        
+
         for _iter in range(iterations):
             if self._converged(S_item, S_item_old, eps) and self._converged(S_user, S_user_old, eps):
                 print(f"Converged at iteration {_iter}, break!")
@@ -272,34 +243,50 @@ class weighted_bipartite_simrank:
             S_item_old = copy.deepcopy(S_item)
             S_user_old = copy.deepcopy(S_user)
             
-            try:
+            if GPU:
                 # Try with GPU
-                print("Updating S_item with GPU...")
                 start1 = time.time()
-                S_item = E_item * C_item * run_dot_product(run_dot_product(W_item_user, S_user), W_item_user.T)
-            except:
+                S_item = self.E_item * C_item * run_dot_product(run_dot_product(self.W_item_user, S_user), self.W_item_user.T)
+            else:
                 # Go with CPU
-                print("GPU failed, trying with CPU...")
                 start1 = time.time()
-                S_item = E_item * C_item * np.dot(np.dot(W_item_user, S_user), W_item_user.T)
+                S_item = self.E_item * C_item * np.dot(np.dot(self.W_item_user, S_user), self.W_item_user.T)
             np.fill_diagonal(S_item, 1)
             end1 = time.time()
 
-            try:
+            if GPU:
                 # Try with GPU
-                print("Updating S_user with GPU...")
                 start2 = time.time()
-                S_user = E_item * C_item * run_dot_product(run_dot_product(W_user_item, S_item), W_user_item.T)
-            except:
+                S_user = self.E_item * C_item * run_dot_product(run_dot_product(self.W_user_item, S_item), self.W_user_item.T)
+            else:
                 # Go with CPU
                 start2 = time.time()
                 print("GPU failed, trying with CPU...")
-                S_user = E_user * C_user * np.dot(np.dot(W_user_item, S_item), W_user_item.T)
+                S_user = self.E_user * C_user * np.dot(np.dot(self.W_user_item, S_item), self.W_user_item.T)
             np.fill_diagonal(S_user, 1)
             end2 = time.time()
 
             print(f"S_user updated in {end1 - start1}, S_item updated in {end2 - start2}!")
-            
+
+        return S_user, S_item
+    
+    def fit(self, df, C_item = 0.8, C_user = 0.8, iterations = 100, eps = 1e-4):
+        G_user, G_item = self._create_graph_from_df(df)
+        self.users = G_user.index
+        self.items = G_item.index
+        self.N_user = len(self.users)
+        self.N_item = len(self.items)
+        print(f"User count: {self.N_user}, item count: {self.N_item}")
+
+        # Cal W for user and item
+        self.W_user_item = self._cal_W(G_user, self.N_user, 'user')
+        self.W_item_user = self._cal_W(G_item, self.N_item, 'item')
+        
+        # Cal E for user and item
+        self.E_user = self._cal_E(G_user, 'user')
+        self.E_item = self._cal_E(G_item, 'item')
+        
+        S_user, S_item = self._cal_S(C_user, C_item, iterations, eps, GPU = False)
         self.S_item = pd.DataFrame(S_item, index = self.items, columns = self.items)
         self.S_user = pd.DataFrame(S_user, index = self.users, columns = self.users)
 
@@ -314,25 +301,41 @@ class weighted_bipartite_simrank:
         print(f"Count of cold start item: {len(cold_start_item)}")
         return cold_start_user, cold_start_item
 
-    def cf_recommendation(self, df, cf_type = 'user', mask = True, melt = True):
+    def cf_recommendation(self, df, k = 10, cf_type = 'user', mask = True, melt = True):
         cold_start_user, cold_start_item = self.compare_train_test_set(df)
         user_to_predict = set(df.userId.unique()) - cold_start_user
 
         if cf_type == 'user':
-            mean_user_rating = self.G_rating.mean(axis=1)
-            # Use np.newaxis so that mean_user_rating has same format as ratings
-            ratings_diff = (self.G_rating - mean_user_rating[:, np.newaxis])
-            pred = mean_user_rating[:, np.newaxis] + self.S_user.dot(ratings_diff) / np.array([np.abs(self.S_user).sum(axis=1)]).T
-        # elif cf_type == 'item':
-        #     pred = ratings.dot(similarity) / np.array([np.abs(similarity).sum(axis=1)]) 
-        pred = pd.DataFrame(pred, index = self.users, columns = self.items)
-        pred = pred[pred.index.isin(user_to_predict)]
-        if mask:
-            pred = pred * (self.G_rating == 0)
+            R = self.G_rating.replace(0, np.nan)
+            mean_user_rating = R.mean(axis=1)
+            diff = (R - mean_user_rating[:, np.newaxis]).fillna(0)
 
+            pred = pd.DataFrame(
+                user_to_predict, 
+                columns = ['userId'])
+            for item in self.items:
+                pred[item] = np.nan
+            pred = pred.set_index('userId')
+
+            curr, total, poc = 0, len(user_to_predict), 0.1
+            for user, _ in pred.iterrows():
+                k_neighbors = set(self.S_user.loc[user].nlargest(k + 1).index) - set([user])
+                s_neighbors = self.S_user[self.S_user.index.isin(k_neighbors)][user]
+                s_neighbors = s_neighbors / s_neighbors.sum()
+                diff_neighbors = diff[diff.index.isin(k_neighbors)]
+                diag = np.zeros((k, k))
+                np.fill_diagonal(diag, s_neighbors)
+                weighted_diff = diag.dot(diff_neighbors).sum(axis = 0)
+                pred.loc[user] = weighted_diff + mean_user_rating[user]
+                if mask:
+                    pred.loc[user] = pred.loc[user] * (self.G_rating.loc[user] == 0)
+                curr += 1
+                if curr / total >= poc:
+                    print(f'{curr}/{total} completed')
+                    poc += 0.1
         if melt:
             pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
-            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating'})
+            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
         return pred
 
 class tag_simrank:
@@ -379,14 +382,7 @@ class tag_simrank:
             pkl.dump(self, f)
         print(f'Model saved as {path + name}')
 
-    def fit(self, df, tag, C_item = 0.8, C_user = 0.8, lbd = 0.3, iterations = 100, eps = 1e-4, how = 'cos'):
-        G_user, G_item = self._create_graph_from_df(df)
-        self.users = G_user.index
-        self.items = G_item.index
-        self.N_user = len(self.users)
-        self.N_item = len(self.items)
-        print(f"User count: {self.N_user}, item count: {self.N_item}")
-        
+    def _cal_tab_based_S(self, tag, how = 'jac', GPU = False):
         print("Initializing tab-based item similarity matrix...")
         start = time.time()
         tag = tag[tag.movieId.isin(self.items)]
@@ -405,65 +401,45 @@ class tag_simrank:
             self.G_tag = self.G_tag.fillna(0)
             tag_and = np.dot(self.G_tag, self.G_tag.T)
 
-            self.S_tag_based = (tag_and / tag_or).replace([np.inf, -np.inf], np.nan).fillna(0).values
+            S_tag_based = (tag_and / tag_or).replace([np.inf, -np.inf], np.nan).fillna(0).values
         
         end = time.time()
         print(f"Finished in {end - start}s!")
+        return S_tag_based
 
-        print("Initializing User spread matrix...")
+    def _cal_W(self, G, N, obj, GPU = False):
+        if obj == 'user':
+            G_var = self.G_rating
+        else:
+            G_var = self.G_rating.T
+        print(f'Initializing {obj}-W matrix...')
         start = time.time()
-        spread_user = np.zeros((self.N_user, self.N_user))
-        np.fill_diagonal(spread_user, G_user.var(axis = 1).apply(lambda x: np.exp(-x)))
-        try:
-            # Try with GPU
-            W_user_item = run_dot_product(spread_user, G_user.fillna(0)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            W_user_item = np.dot(spread_user, G_user.fillna(0))
+        spread = np.zeros((N, N))
+        np.fill_diagonal(
+            spread, 
+            G_var.var(axis = 1).fillna(0).apply(lambda x: np.exp(-x))
+            )
+        if GPU:
+            W = run_dot_product(spread, G.fillna(0))
+        else:
+            W = np.dot(spread, G.fillna(0))
         end = time.time()
         print(f"Finished in {end - start}s!")
-        
-        print("Initializing Item spread matrix...")
+        return W
+    
+    def _cal_E(self, G, obj, GPU = False):
+        print(f"Initializing {obj} evidence matrix...")
         start = time.time()
-        spread_item = np.zeros((self.N_item, self.N_item))
-        np.fill_diagonal(spread_item, G_item.var(axis = 1).apply(lambda x: np.exp(-x)))
-        try:
-            # Try with GPU
-            W_item_user = run_dot_product(spread_user, G_item.fillna(0)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            W_item_user = np.dot(spread_item, G_item.fillna(0))
+        if GPU:
+            E = run_dot_product((G > 0).astype(int), (G > 0).T.astype(int))
+        else:
+            E = np.dot((G > 0).astype(int), (G > 0).T.astype(int))
+        E = 1 - 0.5 ** E
         end = time.time()
         print(f"Finished in {end - start}s!")
-        
-        print("Initializing User evidence matrix...")
-        start = time.time()
-        try:
-            # Try with GPU
-            E_user = run_dot_product((G_user > 0).astype(int), (G_user > 0).T.astype(int)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            E_user = np.dot((G_user > 0).astype(int), (G_user > 0).T.astype(int))
-        E_user = 1 - 0.5**E_user
-        end = time.time()
-        print(f"Finished in {end - start}s!")
-        
-        print("Initializing Item evidence matrix...")
-        start = time.time()
-        try:
-            # Try with GPU
-            E_item = run_dot_product((G_item > 0).astype(int), (G_item > 0).T.astype(int)) 
-        except:
-            # Go with CPU
-            print("GPU failed, trying with CPU...")
-            E_item = np.dot((G_item > 0).astype(int), (G_item > 0).T.astype(int))
-        E_item = 1 - 0.5**E_item
-        end = time.time()
-        print(f"Finished in {end - start}s!")
+        return E
 
+    def _cal_S(self, C_user, C_item, lbd, iterations, eps, GPU = False):
         S_item = np.zeros((self.N_item, self.N_item))
         np.fill_diagonal(S_item, 1)
         S_item_old = np.zeros((self.N_item, self.N_item))
@@ -471,7 +447,7 @@ class tag_simrank:
         S_user = np.zeros((self.N_user, self.N_user))
         np.fill_diagonal(S_user, 1)
         S_user_old = np.zeros((self.N_user, self.N_user))
-        
+
         for _iter in range(iterations):
             if self._converged(S_item, S_item_old, eps) and self._converged(S_user, S_user_old, eps):
                 print(f"Converged at iteration {_iter}, break!")
@@ -481,37 +457,52 @@ class tag_simrank:
             S_item_old = copy.deepcopy(S_item)
             S_user_old = copy.deepcopy(S_user)
             
-            try:
+            if GPU:
                 # Try with GPU
-                print("Updating S_item with GPU...")
                 start1 = time.time()
-                S_item = E_item * C_item * run_dot_product(run_dot_product(W_item_user, S_user), W_item_user.T)
-            except:
+                S_item = self.E_item * C_item * run_dot_product(run_dot_product(self.W_item_user, S_user), self.W_item_user.T)
+            else:
                 # Go with CPU
-                print("GPU failed, trying with CPU...")
                 start1 = time.time()
-                S_item = E_item * C_item * np.dot(np.dot(W_item_user, S_user), W_item_user.T)
-            
+                S_item = self.E_item * C_item * np.dot(np.dot(self.W_item_user, S_user), self.W_item_user.T)
+
             S_item = (1 - lbd) * S_item + lbd * self.S_tag_based
             np.fill_diagonal(S_item, 1)
-            
             end1 = time.time()
 
-            try:
+            if GPU:
                 # Try with GPU
-                print("Updating S_user with GPU...")
                 start2 = time.time()
-                S_user = E_item * C_item * run_dot_product(run_dot_product(W_user_item, S_item), W_user_item.T)
-            except:
+                S_user = self.E_item * C_item * run_dot_product(run_dot_product(self.W_user_item, S_item), self.W_user_item.T)
+            else:
                 # Go with CPU
                 start2 = time.time()
                 print("GPU failed, trying with CPU...")
-                S_user = E_user * C_user * np.dot(np.dot(W_user_item, S_item), W_user_item.T)
+                S_user = self.E_user * C_user * np.dot(np.dot(self.W_user_item, S_item), self.W_user_item.T)
             np.fill_diagonal(S_user, 1)
             end2 = time.time()
-
             print(f"S_user updated in {end1 - start1}, S_item updated in {end2 - start2}!")
-            
+
+        return S_user, S_item
+
+    def fit(self, df, tag, C_item = 0.8, C_user = 0.8, lbd = 0.3, iterations = 100, eps = 1e-4, how = 'cos'):
+        G_user, G_item = self._create_graph_from_df(df)
+        self.users = G_user.index
+        self.items = G_item.index
+        self.N_user = len(self.users)
+        self.N_item = len(self.items)
+        print(f"User count: {self.N_user}, item count: {self.N_item}")
+        
+        self.S_tag_based = self._cal_tab_based_S(tag, how = 'jac', GPU = False)
+
+        self.W_user_item = self._cal_W(G_user, self.N_user, 'user', GPU = False)
+        self.W_item_user = self._cal_W(G_item, self.N_item, 'item', GPU = False)
+        
+        self.E_user = self._cal_E(G_user, 'user', GPU = False)
+        self.E_item = self._cal_E(G_item, 'item', GPU = False)
+        
+        S_user, S_item = self._cal_S(C_user, C_item, lbd, iterations, eps, GPU = False)
+
         self.S_item = pd.DataFrame(S_item, index = self.items, columns = self.items)
         self.S_user = pd.DataFrame(S_user, index = self.users, columns = self.users)
 
@@ -526,24 +517,39 @@ class tag_simrank:
         print(f"Count of cold start item: {len(cold_start_item)}")
         return cold_start_user, cold_start_item
 
-    def cf_recommendation(self, df, cf_type = 'user', mask = True, melt = True):
+    def cf_recommendation(self, df, k = 10, cf_type = 'user', mask = True, melt = True):
         cold_start_user, cold_start_item = self.compare_train_test_set(df)
         user_to_predict = set(df.userId.unique()) - cold_start_user
 
         if cf_type == 'user':
-            mean_user_rating = self.G_rating.mean(axis=1)
-            # Use np.newaxis so that mean_user_rating has same format as ratings
-            ratings_diff = (self.G_rating - mean_user_rating[:, np.newaxis])
-            pred = mean_user_rating[:, np.newaxis] + self.S_user.dot(ratings_diff) / np.array([np.abs(self.S_user).sum(axis=1)]).T
-        # elif cf_type == 'item':
-        #     pred = ratings.dot(similarity) / np.array([np.abs(similarity).sum(axis=1)]) 
-        pred = pd.DataFrame(pred, index = self.users, columns = self.items)
-        pred = pred[pred.index.isin(user_to_predict)]
-        if mask:
-            pred = pred * (self.G_rating == 0)
+            R = self.G_rating.replace(0, np.nan)
+            mean_user_rating = R.mean(axis=1)
+            diff = (R - mean_user_rating[:, np.newaxis]).fillna(0)
 
+            pred = pd.DataFrame(
+                user_to_predict, 
+                columns = ['userId'])
+            for item in self.items:
+                pred[item] = np.nan
+            pred = pred.set_index('userId')
+
+            curr, total, poc = 0, len(user_to_predict), 0.1
+            for user, _ in pred.iterrows():
+                k_neighbors = set(self.S_user.loc[user].nlargest(k + 1).index) - set([user])
+                s_neighbors = self.S_user[self.S_user.index.isin(k_neighbors)][user]
+                s_neighbors = s_neighbors / s_neighbors.sum()
+                diff_neighbors = diff[diff.index.isin(k_neighbors)]
+                diag = np.zeros((k, k))
+                np.fill_diagonal(diag, s_neighbors)
+                weighted_diff = diag.dot(diff_neighbors).sum(axis = 0)
+                pred.loc[user] = weighted_diff + mean_user_rating[user]
+                if mask:
+                    pred.loc[user] = pred.loc[user] * (self.G_rating.loc[user] == 0)
+                curr += 1
+                if curr / total >= poc:
+                    print(f'{curr}/{total} completed')
+                    poc += 0.1
         if melt:
             pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
-            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating'})
+            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
         return pred
-
