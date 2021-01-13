@@ -388,7 +388,7 @@ class tag_simrank:
         tag = tag[tag.movieId.isin(self.items)]
         self.G_tag = tag.pivot(index = 'movieId', columns = 'tagId', values = 'relevance')
         if how == 'cos':
-            self.S_tag_based = cosine_similarity(self.G_tag.fillna(0))
+            S_tag_based = cosine_similarity(self.G_tag.fillna(0))
             
         elif how == 'jac':
             tag_or = pd.DataFrame(

@@ -462,7 +462,7 @@ def recall_over_user_group(
     relevancy_method = "top_k",
     k = DEFAULT_K,
     threshold = DEFAULT_THRESHOLD,
-    plot=True
+    plot = True
     ):
     df_hit, df_hit_count, n_users = _merge_ranking_true_pred(
         rating_true,
