@@ -438,15 +438,15 @@ def precision_over_user_group(
         gPrecisions.append(gPrecision)
         
     precision_dict = {key: value for key, value in zip(groupRanges, gPrecisions)}
-    print("Recall for each user group: ", precision_dict)
-    _, ax = plt.subplots(1,1)
-    x = np.arange(len(groupIds)) 
-    y = gPrecisions
+    print("Precision for each user group: ", precision_dict)
     
     if plot:
+        _, ax = plt.subplots(1,1)
+        x = np.arange(len(groupIds)) 
+        y = gPrecisions
         sns.barplot(x, y, ax = ax)
         ax.set_xticklabels(groupRanges)
-        ax.set_title('Recall Over Different User Groups', size=15)
+        ax.set_title('Precision Over Different User Groups', size=15)
         ax.set_xlabel('User Group With #ratings', size=12)
         plt.show()
     return precision_dict
@@ -493,11 +493,11 @@ def recall_over_user_group(
         
     recall_dict = {key: value for key, value in zip(groupRanges, gRecalls)}
     print("Recall for each user group: ", recall_dict)
-    _, ax = plt.subplots(1,1)
-    x = np.arange(len(groupIds)) 
-    y = gRecalls
     
     if plot:
+        _, ax = plt.subplots(1,1)
+        x = np.arange(len(groupIds)) 
+        y = gRecalls
         sns.barplot(x, y, ax = ax)
         ax.set_xticklabels(groupRanges)
         ax.set_title('Recall Over Different User Groups', size=15)

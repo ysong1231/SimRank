@@ -125,8 +125,8 @@ class naive_bipartite_simrank:
         unique_train_item = set(self.items)
         unique_test_user = set(test_data.userId.unique())
         unique_test_item = set(test_data.movieId.unique())
-        cold_start_user = unique_test_user - unique_test_user & unique_train_user
-        cold_start_item = unique_test_item - unique_test_item & unique_train_item
+        cold_start_user = unique_test_user - (unique_test_user & unique_train_user)
+        cold_start_item = unique_test_item - (unique_test_item & unique_train_item)
         print(f"Count of cold start user: {len(cold_start_user)}")
         print(f"Count of cold start item: {len(cold_start_item)}")
         return cold_start_user, cold_start_item
@@ -295,8 +295,8 @@ class weighted_bipartite_simrank:
         unique_train_item = set(self.items)
         unique_test_user = set(test_data.userId.unique())
         unique_test_item = set(test_data.movieId.unique())
-        cold_start_user = unique_test_user - unique_test_user & unique_train_user
-        cold_start_item = unique_test_item - unique_test_item & unique_train_item
+        cold_start_user = unique_test_user - (unique_test_user & unique_train_user)
+        cold_start_item = unique_test_item - (unique_test_item & unique_train_item)
         print(f"Count of cold start user: {len(cold_start_user)}")
         print(f"Count of cold start item: {len(cold_start_item)}")
         return cold_start_user, cold_start_item
@@ -333,9 +333,44 @@ class weighted_bipartite_simrank:
                 if curr / total >= poc:
                     print(f'{curr}/{total} completed')
                     poc += 0.1
+            
+        elif cf_type == 'item':
+            item_to_recommend = self.items
+            R = self.G_rating.replace(0, np.nan).T
+            mean_item_rating = R.mean(axis = 1)
+            diff = (R - mean_item_rating[:, np.newaxis]).fillna(0)[user_to_predict]
+
+            pred = pd.DataFrame(
+                item_to_recommend, 
+                columns = ['movieId'])
+
+            for user in user_to_predict:
+                pred[user] = np.nan
+            pred = pred.set_index('movieId')
+
+            curr, total, poc = 0, len(item_to_recommend), 0.1
+            for item, _ in pred.iterrows():
+                k_neighbors = set(self.S_item.loc[item].nlargest(k + 1).index) - set([item])
+                s_neighbors = self.S_item[self.S_item.index.isin(k_neighbors)][item]
+                s_neighbors = s_neighbors / s_neighbors.sum()
+                diff_neighbors = diff[diff.index.isin(k_neighbors)]
+                diag = np.zeros((k, k))
+                np.fill_diagonal(diag, s_neighbors)
+                weighted_diff = diag.dot(diff_neighbors).sum(axis = 0)
+                pred.loc[item] = weighted_diff + mean_item_rating[item]
+                if mask:
+                    pred.loc[item] = pred.loc[item] * (self.G_rating.T.loc[item] == 0)
+                curr += 1
+                if curr / total >= poc:
+                    print(f'{curr}/{total} completed')
+                    poc += 0.1  
         if melt:
-            pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
-            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
+            if cf_type == 'user':
+                pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
+                pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
+            else:
+                pred = pd.melt(pred.reset_index(), id_vars = ['movieId'], value_vars = pred.columns).dropna()
+                pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'userId'})
         return pred
 
 class tag_simrank:
@@ -511,8 +546,8 @@ class tag_simrank:
         unique_train_item = set(self.items)
         unique_test_user = set(test_data.userId.unique())
         unique_test_item = set(test_data.movieId.unique())
-        cold_start_user = unique_test_user - unique_test_user & unique_train_user
-        cold_start_item = unique_test_item - unique_test_item & unique_train_item
+        cold_start_user = unique_test_user - (unique_test_user & unique_train_user)
+        cold_start_item = unique_test_item - (unique_test_item & unique_train_item)
         print(f"Count of cold start user: {len(cold_start_user)}")
         print(f"Count of cold start item: {len(cold_start_item)}")
         return cold_start_user, cold_start_item
@@ -549,7 +584,42 @@ class tag_simrank:
                 if curr / total >= poc:
                     print(f'{curr}/{total} completed')
                     poc += 0.1
+            
+        elif cf_type == 'item':
+            item_to_recommend = self.items
+            R = self.G_rating.replace(0, np.nan).T
+            mean_item_rating = R.mean(axis = 1)
+            diff = (R - mean_item_rating[:, np.newaxis]).fillna(0)[user_to_predict]
+
+            pred = pd.DataFrame(
+                item_to_recommend, 
+                columns = ['movieId'])
+
+            for user in user_to_predict:
+                pred[user] = np.nan
+            pred = pred.set_index('movieId')
+
+            curr, total, poc = 0, len(item_to_recommend), 0.1
+            for item, _ in pred.iterrows():
+                k_neighbors = set(self.S_item.loc[item].nlargest(k + 1).index) - set([item])
+                s_neighbors = self.S_item[self.S_item.index.isin(k_neighbors)][item]
+                s_neighbors = s_neighbors / s_neighbors.sum()
+                diff_neighbors = diff[diff.index.isin(k_neighbors)]
+                diag = np.zeros((k, k))
+                np.fill_diagonal(diag, s_neighbors)
+                weighted_diff = diag.dot(diff_neighbors).sum(axis = 0)
+                pred.loc[item] = weighted_diff + mean_item_rating[item]
+                if mask:
+                    pred.loc[item] = pred.loc[item] * (self.G_rating.T.loc[item] == 0)
+                curr += 1
+                if curr / total >= poc:
+                    print(f'{curr}/{total} completed')
+                    poc += 0.1  
         if melt:
-            pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
-            pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
+            if cf_type == 'user':
+                pred = pd.melt(pred.reset_index(), id_vars = ['userId'], value_vars = pred.columns).dropna()
+                pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'movieId'})
+            else:
+                pred = pd.melt(pred.reset_index(), id_vars = ['movieId'], value_vars = pred.columns).dropna()
+                pred = pred[pred['value'] != 0].rename(columns = {'value': 'rating', 'variable': 'userId'})
         return pred
