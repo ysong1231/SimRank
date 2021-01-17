@@ -10,7 +10,7 @@ COL_PREDICTION = "rating"
 DEFAULT_K = 10
 DEFAULT_THRESHOLD = 12
 
-def group(df, to_group = 'user', thres = [5, 10, 50, 100, 500, 1000, 10000, 100000]):
+def group(df, to_group = 'user', thres = [10, 50, 100, 500, 1000, 10000, 100000]):
     def _get_group(x, thres = thres):
         for i in range(len(thres)):
             if x <= thres[i]:
@@ -504,3 +504,66 @@ def recall_over_user_group(
         ax.set_xlabel('User Group With #ratings', size=12)
         plt.show()
     return recall_dict
+
+def ndcg_over_user_group(
+    rating_true,
+    rating_pred,
+    user_grouped,
+    col_user = COL_USER,
+    col_item = COL_ITEM,
+    col_rating = COL_RATING,
+    col_prediction = COL_PREDICTION,
+    relevancy_method = "top_k",
+    k = DEFAULT_K,
+    threshold = DEFAULT_THRESHOLD,
+    plot = True
+    ):
+    df_hit, df_hit_count, n_users = _merge_ranking_true_pred(
+        rating_true,
+        rating_pred,
+        col_user,
+        col_item,
+        col_rating,
+        col_prediction,
+        relevancy_method,
+        user_grouped,
+        k,
+        threshold
+    )
+
+    if df_hit.shape[0] == 0:
+        return 0.0
+    
+    groupIds = sorted(user_grouped.groupId.unique())
+    groupRanges = [user_grouped[user_grouped.groupId == groupId].groupRange.unique()[0] for groupId in groupIds]
+    
+    gNdcgs = list()
+    for groupId in groupIds:
+        idx  = user_grouped[user_grouped.groupId == groupId].userId.unique()
+        count = len(idx)
+        # calculate discounted gain for hit items
+        df_dcg = df_hit[df_hit.userId.isin(idx)]
+        # relevance in this case is always 1
+        df_dcg["dcg"] = 1 / np.log1p(df_dcg["rank"])
+        # sum up discount gained to get discount cumulative gain
+        df_dcg = df_dcg.groupby(col_user, as_index = False, sort = False).agg({"dcg": "sum"})
+        # calculate ideal discounted cumulative gain
+        df_ndcg = pd.merge(df_dcg, df_hit_count, on = [col_user])
+        df_ndcg["idcg"] = df_ndcg["actual"].apply(
+            lambda x: sum(1 / np.log1p(range(1, min(x, k) + 1)))
+        )
+        gNdcgs.append((df_ndcg["dcg"] / df_ndcg["idcg"]).sum() / count)
+        
+    ndcg_dict = {key: value for key, value in zip(groupRanges, gNdcgs)}
+    print("nDCG for each user group: ", ndcg_dict)
+    
+    if plot:
+        _, ax = plt.subplots(1,1)
+        x = np.arange(len(groupIds)) 
+        y = gNdcgs
+        sns.barplot(x, y, ax = ax)
+        ax.set_xticklabels(groupRanges)
+        ax.set_title('nDCG Over Different User Groups', size=15)
+        ax.set_xlabel('User Group With #ratings', size=12)
+        plt.show()
+    return ndcg_dict
