@@ -29,7 +29,7 @@ class cf_recommendation:
             else:
                 self.S = pd.DataFrame(S, index = self.items, columns = self.items)
         elif how == 'pearson':
-            self.S = self.Rating.corr(method = 'pearson').fillna(0)
+            self.S = self.Rating.T.corr(method = 'pearson').fillna(0)
         else:
             raise NotImplementedError(f"Method {how} is not implemented...")
     

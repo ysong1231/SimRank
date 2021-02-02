@@ -195,9 +195,9 @@ class weighted_bipartite_simrank:
 
     def _cal_W(self, G, N, obj, GPU = False):
         if obj == 'user':
-            G_var = self.G_rating
+            G_var = self.G_rating.replace(0, np.nan)
         else:
-            G_var = self.G_rating.T
+            G_var = self.G_rating.T.replace(0, np.nan)
         print(f'Initializing {obj}-W matrix...')
         start = time.time()
         spread = np.zeros((N, N))
