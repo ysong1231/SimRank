@@ -6,7 +6,68 @@ import numpy as np
 import pickle as pkl
 from datetime import datetime
 from sklearn.metrics.pairwise import cosine_similarity
-#from GPU_helper import run_dot_product
+
+def update_progress(progress):
+    barLength = 30
+    status = ''
+    if isinstance(progress, int):
+        progress = float(progress)
+    if not isinstance(progress, float):
+        raise ValueError('Progress must be float')
+    if progress < 0:
+        raise ValueError('Progress below 0')
+    if progress >= 1:
+        progress = 1
+        status = 'Done...\r\n'
+    block = int(round(barLength * progress))
+    text = f'\rPercent: [{"#" * block + "-" * (barLength - block)}] {round(progress * 100, 1)}% {status}'
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    
+class SimRank(object):
+    def __init__(self):
+        self.Nodes = list()
+        self.Graph = pd.DataFrame()
+    
+    def _create_graph(self, data, weighted, from_node_column, to_node_column, weight_column):
+        self.Nodes = set(data[from_node_column].unique()) | set(data[to_node_column].unique())
+        self.Graph = pd.DataFrame(np.zeros((len(self.Nodes), len(self.Nodes))), index = self.Nodes, columns = self.Nodes)
+        if weighted:
+            inNeighbors = data.groupby(to_node_column)[weight_column].sum().to_frame().rename(columns = {weight_column: 'inNeighbors'})  
+        else:
+            inNeighbors = data.groupby(to_node_column)[from_node_column].count().to_frame().rename(columns = {from_node_column: 'inNeighbors'})
+        data = data.join(inNeighbors, on = in_node_column)
+        data['_normailized_weight'] = (1.0 / data['inNeighbors']).replace([np.inf, -np.inf], np.nan).fillna(0)
+        Graph = data.pivot(index = to_node_column, columns = from_node_column, values = '_normailized_weight').fillna(0)
+        for _name, _row in Graph.iterrows():
+            self.Graph.loc[_name][_row.index] = _row
+    
+    def _converged(self, s1, s2, eps):
+        diff = (abs(s1 - s2) > eps).sum()
+        if diff:
+            return False
+        return True
+    
+    def fit(self, data, C = 0.8, weighted = False, from_node_column = 'from', to_node_column = 'to', weight_column = 'weight', iterations = 100, eps = 1e-4, verbose = True):
+        self._create_graph(data, weighted, from_node_column, to_node_column, weight_column)
+        
+        old_S = np.zeros((len(self.Nodes), len(self.Nodes)))
+        new_S = np.zeros((len(self.Nodes), len(self.Nodes)))
+        np.fill_diagonal(new_S, 1)
+        if verbose:
+            print('Start iterating...')
+        for _iter in range(iterations):
+            if self._converged(old_S, new_S, eps):
+                if verbose:
+                    print(f'\n\rConerged at iteration {_iter}, process complete!')
+                break
+            if verbose:
+                update_progress(_iter/iterations)
+            old_S = copy.deepcopy(new_S)
+            new_S = C * self.Graph.values.dot(new_S).dot(self.Graph.T)
+            np.fill_diagonal(new_S, 1)
+        return pd.DataFrame(new_S, index = self.Nodes, columns = self.Nodes)
+        
 
 class naive_bipartite_simrank:
     def __init__(self):
