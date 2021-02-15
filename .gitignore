@@ -1,5 +1,4 @@
 # Byte-compiled / optimized / DLL files
-*.ipynb
 .DS_Store
 *.pkl
 *.csv

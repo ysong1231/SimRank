@@ -3,7 +3,7 @@ import copy
 import time
 import pandas as pd
 import numpy as np
-from modules.Helper import *
+from SimRank.Helper import *
     
 class SimRank(object):
     def __init__(self):
