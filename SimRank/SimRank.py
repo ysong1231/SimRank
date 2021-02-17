@@ -6,11 +6,39 @@ import numpy as np
 from SimRank.Helper import *
     
 class SimRank(object):
+    """
+    Basic class of the SimRank algorithm. Calculate the similarities between the
+    nodes in a weighted/unweighted directive graph.
+
+    Attributes
+    ----------
+    Nodes: set
+        A set of string representing the nodes in the given graph.
+    Graph: pandas.DataFrame
+        A padas DataFrame representing the graph
+    """
     def __init__(self):
         self.Nodes = set()
         self.Graph = pd.DataFrame()
     
     def _create_graph(self, data, weighted, from_node_column, to_node_column, weight_column):
+        """
+        Create a graph from the given data frame by using the given columns 
+        and pivot the given dataframe.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Raw data.
+        weighted : boolean
+            Whether considering weights when pivoting the raw data.
+        from_node_column : string
+            The column name of the starting nodes.
+        to_node_column : string
+            The column name of the ending nodes.
+        weight_column : string
+            The column name of the weightings.
+        """
         self.Nodes = set(data[from_node_column].unique()) | set(data[to_node_column].unique())
         self.Graph = pd.DataFrame(np.zeros((len(self.Nodes), len(self.Nodes))), index = self.Nodes, columns = self.Nodes)
         if weighted:
@@ -24,14 +52,75 @@ class SimRank(object):
             self.Graph.loc[_name][_row.index] = _row
     
     def _converged(self, s1, s2, eps):
+        """
+        A helper function to indicate whether the difference between the two given
+        matrixs are smaller than the given error.
+
+        Parameters
+        ----------
+        s1 : numpy.array
+            Matrix 1 for comparation.
+        s2 : numpy.array
+            Matrix 1 for comparation. Must be the same shape as s1.
+        eps : float
+            The error threshold.
+        
+        Returns
+        ----------
+        Boolean
+            True, if s1 and s2's difference are smaller than the given error;
+            False, if not
+        """
         diff = (abs(s1 - s2) > eps).sum()
         if diff:
             return False
         return True
     
-    def fit(self, data, C = 0.8, weighted = False, from_node_column = 'from', to_node_column = 'to', weight_column = 'weight', iterations = 100, eps = 1e-4, verbose = True):
+    def fit(self, data, C = 0.8, weighted = False, from_node_column = 'from', to_node_column = 'to', 
+            weight_column = 'weight', iterations = 100, eps = 1e-4, verbose = True):
+        """
+        The main method to run the recursion iterations. Calculating the 
+        similarities between nodes from the input data. Return a similarities 
+        matrix.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Raw data.
+        C : float, optional
+            Damping coefficient defined in the algorithm. 
+            The default value is 0.8.
+        weighted : boolean, optional
+            Whether considering weights when pivoting the raw data.
+            The default value is False.
+        from_node_column : string, optional
+            The column name of the starting nodes.
+            The default column name is "from".
+        to_node_column : string, optional
+            The column name of the ending nodes.
+            The default column name is "to".
+        weight_column : string, optional
+            The column name of the weightings.
+            The default column name is "weight".
+        iterations : integer, optional
+            The max iteration number of the calculation process. The 
+            process is end when reached the max iteration times.
+            The default max iteration time is 100.
+        eps : float, optional
+            The error threshold. The iteration will be stopped when the 
+            difference is less than the given error.
+            The default number is 1e-4.
+        verbose : boolean, optional
+            Deciding whether the intermediate progress will be printed out.
+            The intermediate progress will be printed out by default.
+
+        Returns
+        ----------
+        pandas.DataFrame
+            A pandas DataFrame storing the similarities between the nodes
+            in the given graph.
+        """
         self._create_graph(data, weighted, from_node_column, to_node_column, weight_column)
-        
         old_S = np.zeros((len(self.Nodes), len(self.Nodes)))
         new_S = np.zeros((len(self.Nodes), len(self.Nodes)))
         np.fill_diagonal(new_S, 1)
@@ -52,6 +141,24 @@ class SimRank(object):
         return pd.DataFrame(new_S, index = self.Nodes, columns = self.Nodes)
         
 class BipartiteSimRank(object):
+    """
+    Basic class of the SimRank algorithm on a bipartitle graph. Calculate the 
+    similarities between the two group of nodes in a weighted/unweighted bipartitle 
+    graph separately.
+
+    Attributes
+    ----------
+    NodesGroup1: set
+        A set of string representing the first group of nodes in the given graph.
+    NodesGroup2: set
+        A set of string representing the second group of nodes in the given graph.
+    Graph_N1_N2: pandas.DataFrame
+        A padas DataFrame representing the graph from the first group of nodes to 
+        the second group of nodes.
+    Graph_N2_N1: pandas.DataFrame
+        A padas DataFrame representing the graph from the second group of nodes to 
+        the first group of nodes.
+    """
     def __init__(self):
         self.NodesGroup1 = set()
         self.NodesGroup2 = set()
@@ -59,6 +166,23 @@ class BipartiteSimRank(object):
         self.Graph_N2_N1 = pd.DataFrame()
     
     def _create_graph(self, data, weighted, node_group1_column, node_group2_column, weight_column):
+        """
+        Create a graph from the given data frame by using the given columns 
+        and pivot the given dataframe.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Raw data.
+        weighted : boolean
+            Whether considering weights when pivoting the raw data.
+        node_group1_column : string
+            The column name of the first group of nodes.
+        node_group2_column : string
+            The column name of the second group of nodes.
+        weight_column : string
+            The column name of the weightings.
+        """
         self.NodesGroup1 = set(data[node_group1_column].unique())
         self.NodesGroup2 = set(data[node_group2_column].unique())
         self.Graph_N1_N2 = pd.DataFrame(np.zeros((len(self.NodesGroup1), len(self.NodesGroup2))), index = self.NodesGroup1, columns = self.NodesGroup2)
@@ -76,12 +200,82 @@ class BipartiteSimRank(object):
         self.Graph_N2_N1 = data.pivot(index = node_group2_column, columns = node_group1_column, values = 'n2_n1_normailized_weight').fillna(0)
     
     def _converged(self, s1, s2, eps):
+        """
+        A helper function to indicate whether the difference between the two given
+        matrixs are smaller than the given error.
+
+        Parameters
+        ----------
+        s1 : numpy.array
+            Matrix 1 for comparation.
+        s2 : numpy.array
+            Matrix 1 for comparation. Must be the same shape as s1.
+        eps : float
+            The error threshold.
+        
+        Returns
+        ----------
+        Boolean
+            True, if s1 and s2's difference are smaller than the given error;
+            False, if not
+        """
         diff = (abs(s1 - s2) > eps).sum()
         if diff:
             return False
         return True
     
-    def fit(self, data, C1 = 0.8, C2 = 0.8, weighted = False, node_group1_column = 'user', node_group2_column = 'item', weight_column = 'weight', iterations = 100, eps = 1e-4, verbose = True):
+    def fit(self, data, C1 = 0.8, C2 = 0.8, weighted = False, node_group1_column = 'user', node_group2_column = 'item', 
+            weight_column = 'weight', iterations = 100, eps = 1e-4, verbose = True):
+        """
+        The main method to run the recursion iterations. Calculating the 
+        similarities between nodes from the input data. Return a similarities 
+        matrix.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Raw data.
+        C1 : float, optional
+            Damping coefficient defined in the algorithm that will be multiplied
+            to the first group of nodes' similarities during the iteration.
+            The default value is 0.8.
+        C2 : float, optional
+            Damping coefficient defined in the algorithm that will be multiplied
+            to the second group of nodes' similarities during the iteration.
+            The default value is 0.8.
+        weighted : boolean, optional
+            Whether considering weights when pivoting the raw data.
+            The default value is False.
+        node_group1_column : string, optional
+            The column name of the first group of nodes.
+            The default column name is "user".
+        node_group2_column : string, optional
+            The column name of the second group of nodes.
+            The default column name is "item".
+        weight_column : string, optional
+            The column name of the weightings.
+            The default column name is "weight".
+        iterations : integer, optional
+            The max iteration number of the calculation process. The 
+            process is end when reached the max iteration times.
+            The default max iteration time is 100.
+        eps : float, optional
+            The error threshold. The iteration will be stopped when the 
+            difference is less than the given error.
+            The default number is 1e-4.
+        verbose : boolean, optional
+            Deciding whether the intermediate progress will be printed out.
+            The intermediate progress will be printed out by default.
+
+        Returns
+        ----------
+        pandas.DataFrame
+            A pandas DataFrame storing the similarities between the first
+            group of nodes in the given graph.
+        pandas.DataFrame
+            A pandas DataFrame storing the similarities between the second
+            group of nodes in the given graph.
+        """
         self._create_graph(data, weighted, node_group1_column, node_group2_column, weight_column)
         old_S_N1 = np.zeros((len(self.NodesGroup1), len(self.NodesGroup1)))
         new_S_N1 = np.zeros((len(self.NodesGroup1), len(self.NodesGroup1)))
