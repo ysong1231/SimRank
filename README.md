@@ -3,6 +3,9 @@ A Python implementation of SimRank and SimRank++ algorithms on both directive gr
 
 * The algorithm is implemented in a matrix manipulation fashion instead of the traditional recursion method. 
 
+# Author
+Yilin Song
+
 ### Requirements
 1. Pandas
 2. Numpy
